@@ -152,6 +152,45 @@ marketflow/
 └── README.md
 ```
 
+## Deploy to GitHub Pages
+
+MarketFlow includes a GitHub Actions workflow that automatically builds and deploys the static version to GitHub Pages. The static build works without a backend — all demo data is baked into a `demo-data.json` file that the app loads at runtime.
+
+### Steps
+
+1. **Create a new GitHub repository:**
+   ```bash
+   git remote add origin https://github.com/YOUR_USERNAME/marketflow.git
+   git push -u origin main
+   ```
+
+2. **Enable GitHub Pages:**
+   - Go to your repository **Settings → Pages**
+   - Under **Build and deployment → Source**, select **GitHub Actions**
+   - The included workflow (`.github/workflows/deploy.yml`) will trigger on every push to `main`
+
+3. **Wait for the build:** The GitHub Actions workflow will:
+   - Install dependencies (`npm ci`)
+   - Build the static site (`npm run build:pages`)
+   - Deploy to `https://YOUR_USERNAME.github.io/marketflow/`
+
+4. **Your site is live** at `https://YOUR_USERNAME.github.io/marketflow/`
+
+### How Static Mode Works
+
+- The `queryClient.ts` includes a static data fallback: when API calls fail (no backend), it loads `demo-data.json` from the same origin
+- All 12 API endpoints' responses are snapshotted into `client/public/demo-data.json` (493 KB)
+- Mutations (add/edit/delete) are simulated — they return success but don't persist
+- The app is fully functional in read-only/demo mode on any static host
+
+### Manual Deployment
+
+If you prefer to build and upload manually:
+```bash
+npm run build:pages
+# Upload the contents of dist/public/ to your GitHub Pages branch (gh-pages)
+```
+
 ## Database Design
 
 ### Demo Mode (SQLite)
