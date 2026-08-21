@@ -2,7 +2,8 @@ import "dotenv/config";
 import express, { Response, NextFunction } from 'express';
 import type { Request } from 'express';
 import { registerRoutes } from "./routes";
-import { registerAuthRoutes } from "./auth";
+import { registerAuthRoutes, attachUser } from "./auth";
+import { runWithUser } from "./request-context";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
 
@@ -23,6 +24,18 @@ app.use((req, res, next) => {
   res.json = function (bodyJson, ...args) { capturedJsonResponse = bodyJson; return originalResJson.apply(res, [bodyJson, ...args]); };
   res.on("finish", () => { const duration = Date.now() - start; if (path.startsWith("/api")) { let line = `${req.method} ${path} ${res.statusCode} in ${duration}ms`; if (capturedJsonResponse) line += ` :: ${JSON.stringify(capturedJsonResponse)}`; log(line); } });
   next();
+});
+
+// Resolve the session before protected API routes. Authentication endpoints remain public.
+app.use("/api", async (req, res, next) => {
+  if (req.path.startsWith("/auth/")) return next();
+  try {
+    const user = await attachUser(req);
+    if (!user) return res.status(401).json({ message: "Authentication required" });
+    return runWithUser(user.id, next);
+  } catch (error) {
+    return next(error);
+  }
 });
 
 (async () => {
