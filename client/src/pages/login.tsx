@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Mail, Lock, ArrowRight, Sparkles, BarChart3, Users, Workflow } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch, readApiResponse } from "@/lib/api";
 
 export default function Login() {
   const [, navigate] = useLocation();
@@ -17,9 +18,8 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/login", { method:"POST", headers:{"Content-Type":"application/json"}, credentials:"include", body:JSON.stringify({email,password}) });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.message || "Unable to sign in");
+      const res = await apiFetch("/api/auth/login", { method:"POST", body:JSON.stringify({email,password}) });
+      await readApiResponse(res);
       toast({ title:"Welcome back", description:"You are signed in." });
       navigate("/");
     } catch (error) {
@@ -42,10 +42,7 @@ export default function Login() {
           <div className="space-y-2"><Label htmlFor="login-pass">Password</Label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="login-pass" type="password" value={password} onChange={e=>setPassword(e.target.value)} className="pl-9" placeholder="••••••••" required /></div></div>
           <Button type="submit" className="w-full" size="lg" disabled={loading}>{loading ? "Signing in…" : "Sign in"} <ArrowRight className="ml-1.5 h-4 w-4" /></Button>
         </form>
-        <div className="mt-6 space-y-2 text-center">
-          <p className="text-sm text-muted-foreground">New to MarketFlow? <button type="button" className="font-medium text-primary hover:underline" onClick={() => navigate("/register")}>Create an account</button></p>
-          <p className="text-xs text-muted-foreground">Demo account: <code>demo@marketflow.io</code> / <code>demo</code></p>
-        </div>
+        <div className="mt-6 space-y-2 text-center"><p className="text-sm text-muted-foreground">New to MarketFlow? <button type="button" className="font-medium text-primary hover:underline" onClick={() => navigate("/register")}>Create an account</button></p><p className="text-xs text-muted-foreground">Demo account: <code>demo@marketflow.io</code> / <code>demo</code></p></div>
       </div></div>
     </div>
   );
