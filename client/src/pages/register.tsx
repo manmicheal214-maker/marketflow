@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Mail, Lock, User, ArrowRight, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch, readApiResponse } from "@/lib/api";
 
 export default function Register() {
   const [, navigate] = useLocation();
@@ -19,9 +20,8 @@ export default function Register() {
     if (form.password !== form.confirmPassword) return toast({ title: "Passwords do not match", description: "Enter the same password twice.", variant: "destructive" });
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ fullName: form.fullName, email: form.email, password: form.password }) });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.message || "Unable to create account");
+      const res = await apiFetch("/api/auth/register", { method: "POST", body: JSON.stringify({ fullName: form.fullName, email: form.email, password: form.password }) });
+      await readApiResponse(res);
       toast({ title: "Account created", description: "Welcome to MarketFlow." });
       navigate("/");
     } catch (error) {
