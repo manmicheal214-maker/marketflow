@@ -1,9 +1,8 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
+import { getCurrentWorkspaceId } from "./workspaceStore";
 
 // ── Static data fallback for GitHub Pages ──
-// Used for any endpoint NOT yet backed by a real Supabase table
-// (segments, templates, ab-tests, lead-scoring, etc.)
 let staticData: Record<string, any> | null = null;
 
 const keyMap: Record<string, string> = {
@@ -46,8 +45,7 @@ function getStaticData(queryKey: string, data: Record<string, any>): any | undef
         const events = (data["emailEvents"] || []).filter(
           (e: any) => String(e.contactId) === id
         );
-        const scoreEvents = contact.scoreEvents || [];
-        return { contact, scoreEvents, events };
+        return { contact, scoreEvents: contact.scoreEvents || [], events };
       }
     }
     return undefined;
@@ -55,11 +53,7 @@ function getStaticData(queryKey: string, data: Record<string, any>): any | undef
   return undefined;
 }
 
-// ── Live Supabase adapter ──
-// Tables that actually exist in Supabase get queried directly, so the
-// deployed static site shows real data instead of the demo snapshot.
-// Extend SUPABASE_TABLE_MAP as more tables get built.
-
+// ── Live Supabase adapter, scoped by workspace ──
 const SUPABASE_TABLE_MAP: Record<string, string> = {
   "/api/contacts": "contacts",
   "/api/campaigns": "campaigns",
@@ -68,14 +62,21 @@ const SUPABASE_TABLE_MAP: Record<string, string> = {
 };
 
 function isSupabaseBackedKey(queryKey: string): boolean {
-  return (
-    queryKey in SUPABASE_TABLE_MAP ||
-    queryKey.startsWith("/api/contacts/")
-  );
+  return queryKey in SUPABASE_TABLE_MAP || queryKey.startsWith("/api/contacts/");
+}
+
+class NoWorkspaceError extends Error {
+  constructor() {
+    super("No current workspace selected");
+    this.name = "NoWorkspaceError";
+  }
 }
 
 async function fetchFromSupabase(queryKey: string): Promise<any> {
   if (!supabase) throw new Error("Supabase not configured");
+
+  const workspaceId = getCurrentWorkspaceId();
+  if (!workspaceId) throw new NoWorkspaceError();
 
   // Single contact detail: /api/contacts/:id
   if (queryKey.startsWith("/api/contacts/")) {
@@ -84,6 +85,7 @@ async function fetchFromSupabase(queryKey: string): Promise<any> {
       .from("contacts")
       .select("*")
       .eq("id", id)
+      .eq("workspace_id", workspaceId) // belt-and-suspenders on top of RLS
       .single();
     if (contactErr) throw contactErr;
 
@@ -91,6 +93,7 @@ async function fetchFromSupabase(queryKey: string): Promise<any> {
       .from("email_events")
       .select("*")
       .eq("contact_id", id)
+      .eq("workspace_id", workspaceId)
       .order("occurred_at", { ascending: false });
 
     return { contact, scoreEvents: [], events: events ?? [] };
@@ -100,6 +103,7 @@ async function fetchFromSupabase(queryKey: string): Promise<any> {
   const { data, error } = await supabase
     .from(table)
     .select("*")
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -115,10 +119,7 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-// ── Mutations ──
-// On static hosts with Supabase configured, real mutations go straight to
-// Supabase for live-backed tables. Otherwise mutations are simulated
-// (matches prior demo behavior) so the UI still responds optimistically.
+// ── Mutations, workspace-scoped ──
 export async function apiRequest(
   method: string,
   url: string,
@@ -131,34 +132,54 @@ export async function apiRequest(
     });
 
   if (isSupabaseConfigured && supabase && method !== "GET") {
-    const [, , resource, id] = url.split("/"); // "/api/contacts/123" -> ["", "api", "contacts", "123"]
+    const [, , resource, id] = url.split("/");
     const table = SUPABASE_TABLE_MAP[`/api/${resource}`];
 
     if (table) {
+      const workspaceId = getCurrentWorkspaceId();
+      if (!workspaceId) {
+        throw new NoWorkspaceError();
+      }
+
       if (method === "POST") {
-        const { data: inserted, error } = await supabase.from(table).insert(data as any).select().single();
+        // Stamp workspace_id on every insert — never trust the caller to
+        // have included it, and never let it be overridden by request data.
+        const payload = { ...(data as object), workspace_id: workspaceId };
+        const { data: inserted, error } = await supabase
+          .from(table)
+          .insert(payload)
+          .select()
+          .single();
         if (error) throw error;
         return ok(inserted);
       }
       if (method === "PATCH" || method === "PUT") {
-        const { data: updated, error } = await supabase.from(table).update(data as any).eq("id", id).select().single();
+        const { data: updated, error } = await supabase
+          .from(table)
+          .update(data as any)
+          .eq("id", id)
+          .eq("workspace_id", workspaceId) // can't accidentally patch another workspace's row
+          .select()
+          .single();
         if (error) throw error;
         return ok(updated);
       }
       if (method === "DELETE") {
-        const { error } = await supabase.from(table).delete().eq("id", id);
+        const { error } = await supabase
+          .from(table)
+          .delete()
+          .eq("id", id)
+          .eq("workspace_id", workspaceId);
         if (error) throw error;
         return ok({ success: true });
       }
     }
   }
 
-  // Non-Supabase-backed resource on a static host: simulate success
   if (method !== "GET" && !API_BASE) {
     return ok({ success: true, simulated: true });
   }
 
-  // Local dev / real Express backend
   const res = await fetch(`${API_BASE}${url}`, {
     method,
     headers: data ? { "Content-Type": "application/json" } : {},
@@ -177,17 +198,20 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     const key = queryKey[0] as string;
 
-    // 1. Prefer live Supabase data for tables we actually have
     if (isSupabaseConfigured && isSupabaseBackedKey(key)) {
       try {
         return await fetchFromSupabase(key);
       } catch (err) {
+        if (err instanceof NoWorkspaceError) {
+          // Don't fall back to demo data here — an empty/loading state is
+          // more honest than showing another tenant's shape of data while
+          // workspace membership is still loading.
+          return null;
+        }
         console.warn(`Supabase query failed for ${key}, falling back to demo data:`, err);
-        // fall through to demo data below
       }
     }
 
-    // 2. Try the real API (local dev / self-hosted Express backend)
     if (API_BASE || !isSupabaseConfigured) {
       try {
         const res = await fetch(`${API_BASE}${key}`);
@@ -198,11 +222,10 @@ export const getQueryFn: <T>(options: {
         await throwIfResNotOk(res);
         return await res.json();
       } catch {
-        // API not reachable (static host) — fall through to demo data
+        // fall through to demo data
       }
     }
 
-    // 3. Static demo data fallback
     const data = await loadStaticData();
     const result = getStaticData(key, data);
     if (result === undefined && unauthorizedBehavior === "throw") {
