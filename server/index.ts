@@ -14,6 +14,21 @@ declare module "http" { interface IncomingMessage { rawBody: unknown; } }
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
 
+// The frontend is hosted separately (for example GitHub Pages), so the API must explicitly allow it.
+const allowedOrigins = (process.env.CLIENT_ORIGIN || "https://manmicheal214-maker.github.io,http://localhost:5173,http://localhost:5000").split(",").map(v => v.trim()).filter(Boolean);
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.setHeader("Vary", "Origin");
+  }
+  if (req.method === "OPTIONS") return res.sendStatus(origin && allowedOrigins.includes(origin) ? 204 : 403);
+  next();
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true });
   console.log(`${formattedTime} [${source}] ${message}`);
@@ -26,16 +41,16 @@ app.use((req, res, next) => {
   next();
 });
 
-// Resolve the session before protected API routes. Authentication endpoints remain public.
+app.get("/api/health", (_req, res) => res.json({ ok: true, service: "marketflow-api", time: new Date().toISOString() }));
+
 app.use("/api", async (req, res, next) => {
   if (req.path.startsWith("/auth/")) return next();
+  if (req.path === "/health") return next();
   try {
     const user = await attachUser(req);
     if (!user) return res.status(401).json({ message: "Authentication required" });
     return runWithUser(user.id, next);
-  } catch (error) {
-    return next(error);
-  }
+  } catch (error) { return next(error); }
 });
 
 (async () => {
