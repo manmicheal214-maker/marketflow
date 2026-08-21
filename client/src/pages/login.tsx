@@ -42,7 +42,10 @@ export default function Login() {
           <div className="space-y-2"><Label htmlFor="login-pass">Password</Label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="login-pass" type="password" value={password} onChange={e=>setPassword(e.target.value)} className="pl-9" placeholder="••••••••" required /></div></div>
           <Button type="submit" className="w-full" size="lg" disabled={loading}>{loading ? "Signing in…" : "Sign in"} <ArrowRight className="ml-1.5 h-4 w-4" /></Button>
         </form>
-        <p className="text-xs text-muted-foreground mt-6 text-center">Need an account? Registration is now available through <code>/api/auth/register</code>.</p>
+        <div className="mt-6 space-y-2 text-center">
+          <p className="text-sm text-muted-foreground">New to MarketFlow? <button type="button" className="font-medium text-primary hover:underline" onClick={() => navigate("/register")}>Create an account</button></p>
+          <p className="text-xs text-muted-foreground">Demo account: <code>demo@marketflow.io</code> / <code>demo</code></p>
+        </div>
       </div></div>
     </div>
   );
