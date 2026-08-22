@@ -2,62 +2,15 @@ import "dotenv/config";
 import express, { Response, NextFunction } from 'express';
 import type { Request } from 'express';
 import { registerRoutes } from "./routes";
-import { registerAuthRoutes, attachUser } from "./auth";
-import { runWithUser } from "./request-context";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
 
 const app = express();
 const httpServer = createServer(app);
-
 declare module "http" { interface IncomingMessage { rawBody: unknown; } }
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
-
-// The frontend is hosted separately (for example GitHub Pages), so the API must explicitly allow it.
-const allowedOrigins = (process.env.CLIENT_ORIGIN || "https://manmicheal214-maker.github.io,http://localhost:5173,http://localhost:5000").split(",").map(v => v.trim()).filter(Boolean);
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-    res.setHeader("Vary", "Origin");
-  }
-  if (req.method === "OPTIONS") return res.sendStatus(origin && allowedOrigins.includes(origin) ? 204 : 403);
-  next();
-});
-
-export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true });
-  console.log(`${formattedTime} [${source}] ${message}`);
-}
-app.use((req, res, next) => {
-  const start = Date.now(); const path = req.path; let capturedJsonResponse: Record<string, any> | undefined;
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) { capturedJsonResponse = bodyJson; return originalResJson.apply(res, [bodyJson, ...args]); };
-  res.on("finish", () => { const duration = Date.now() - start; if (path.startsWith("/api")) { let line = `${req.method} ${path} ${res.statusCode} in ${duration}ms`; if (capturedJsonResponse) line += ` :: ${JSON.stringify(capturedJsonResponse)}`; log(line); } });
-  next();
-});
-
-app.get("/api/health", (_req, res) => res.json({ ok: true, service: "marketflow-api", time: new Date().toISOString() }));
-
-app.use("/api", async (req, res, next) => {
-  if (req.path.startsWith("/auth/")) return next();
-  if (req.path === "/health") return next();
-  try {
-    const user = await attachUser(req);
-    if (!user) return res.status(401).json({ message: "Authentication required" });
-    return runWithUser(user.id, next);
-  } catch (error) { return next(error); }
-});
-
-(async () => {
-  registerAuthRoutes(app);
-  await registerRoutes(httpServer, app);
-  app.use((err: any, _req: Request, res: Response, next: NextFunction) => { const status = err.status || err.statusCode || 500; const message = err.message || "Internal Server Error"; console.error("Internal Server Error:", err); if (res.headersSent) return next(err); return res.status(status).json({ message }); });
-  if (process.env.NODE_ENV === "production") serveStatic(app); else { const { setupVite } = await import("./vite"); await setupVite(httpServer, app); }
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => log(`serving on port ${port}`));
-})();
+export function log(message: string, source = "express") { const formattedTime = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true }); console.log(`${formattedTime} [${source}] ${message}`); }
+app.use((req, res, next) => { const start = Date.now(); const path = req.path; let capturedJsonResponse: Record<string, any> | undefined; const originalResJson = res.json; res.json = function(bodyJson,...args){capturedJsonResponse=bodyJson;return originalResJson.apply(res,[bodyJson,...args]);}; res.on("finish",()=>{const duration=Date.now()-start;if(path.startsWith("/api")){let line=`${req.method} ${path} ${res.statusCode} in ${duration}ms`;if(capturedJsonResponse)line+=` :: ${JSON.stringify(capturedJsonResponse)}`;log(line);}});next();});
+app.get("/api/health", (_req,res)=>res.json({ok:true,service:"marketflow-api",time:new Date().toISOString()}));
+(async()=>{ await registerRoutes(httpServer,app); app.use((err:any,_req:Request,res:Response,next:NextFunction)=>{const status=err.status||err.statusCode||500;const message=err.message||"Internal Server Error";console.error("Internal Server Error:",err);if(res.headersSent)return next(err);return res.status(status).json({message});}); if(process.env.NODE_ENV==="production")serveStatic(app);else{const{setupVite}=await import("./vite");await setupVite(httpServer,app);} const port=parseInt(process.env.PORT||"5000",10);httpServer.listen({port,host:"0.0.0.0",reusePort:true},()=>log(`serving on port ${port}`));})();
