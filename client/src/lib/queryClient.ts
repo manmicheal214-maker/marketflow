@@ -2,10 +2,6 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { getCurrentWorkspaceId } from "@/lib/workspace";
 
-// ── Static data fallback for GitHub Pages ──
-// Live Supabase tables are used for the workspace-scoped resources below.
-// All other resources retain the existing demo snapshot fallback.
-
 let staticData: Record<string, any> | null = null;
 
 const keyMap: Record<string, string> = {
@@ -29,6 +25,24 @@ const SUPABASE_TABLE_MAP: Record<string, string> = {
   "/api/automations": "automations",
   "/api/email-events": "email_events",
 };
+
+function toSnakeCase(obj: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    out[snakeKey] = value;
+  }
+  return out;
+}
+
+function toCamelCase<T = any>(obj: Record<string, any>): T {
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    out[camelKey] = value;
+  }
+  return out as T;
+}
 
 async function loadStaticData(): Promise<Record<string, any>> {
   if (staticData) return staticData;
@@ -97,7 +111,9 @@ export async function apiRequest(method: string, url: string, data?: unknown | u
       throw new Error("No workspace selected. Please select a workspace and try again.");
     }
 
-    const payload = data && typeof data === "object" ? { ...(data as Record<string, unknown>) } : {};
+    const rawPayload = data && typeof data === "object" ? { ...(data as Record<string, unknown>) } : {};
+    delete rawPayload.workspace_id;
+    const payload = toSnakeCase(rawPayload);
     delete payload.workspace_id;
 
     if (method === "POST") {
@@ -107,7 +123,7 @@ export async function apiRequest(method: string, url: string, data?: unknown | u
         .select()
         .single();
       if (error) throw error;
-      return responseFromJson(inserted, 201);
+      return responseFromJson(toCamelCase(inserted));
     }
 
     if (live.id && (method === "PATCH" || method === "PUT")) {
@@ -119,7 +135,7 @@ export async function apiRequest(method: string, url: string, data?: unknown | u
         .select()
         .single();
       if (error) throw error;
-      return responseFromJson(updated);
+      return responseFromJson(toCamelCase(updated));
     }
 
     if (live.id && method === "DELETE") {
@@ -130,11 +146,10 @@ export async function apiRequest(method: string, url: string, data?: unknown | u
         .eq("workspace_id", workspaceId)
         .select();
       if (error) throw error;
-      return responseFromJson(deleted);
+      return responseFromJson(Array.isArray(deleted) ? deleted.map((row) => toCamelCase(row)) : deleted);
     }
   }
 
-  // Preserve the existing static-host behavior for resources that are not live yet.
   if (method !== "GET" && !API_BASE) {
     return responseFromJson({ success: true, simulated: true });
   }
@@ -158,7 +173,6 @@ export const getQueryFn: <T>(options: { on401: UnauthorizedBehavior }) => QueryF
 
     if (live) {
       const workspaceId = getCurrentWorkspaceId();
-      // Do not show another tenant's demo snapshot while workspace context is loading.
       if (!workspaceId) return null;
 
       try {
@@ -169,7 +183,11 @@ export const getQueryFn: <T>(options: { on401: UnauthorizedBehavior }) => QueryF
           ]);
           if (contactResult.error) throw contactResult.error;
           if (eventsResult.error) throw eventsResult.error;
-          return { contact: contactResult.data, scoreEvents: [], events: eventsResult.data ?? [] } as T;
+          return {
+            contact: toCamelCase(contactResult.data),
+            scoreEvents: [],
+            events: (eventsResult.data ?? []).map((row) => toCamelCase(row)),
+          } as T;
         }
 
         const { data, error } = await supabase
@@ -178,7 +196,7 @@ export const getQueryFn: <T>(options: { on401: UnauthorizedBehavior }) => QueryF
           .eq("workspace_id", workspaceId)
           .order("created_at", { ascending: false });
         if (error) throw error;
-        return (data ?? []) as T;
+        return (data ?? []).map((row) => toCamelCase(row)) as T;
       } catch (error) {
         console.warn(`Supabase query failed for ${qk}; falling back to demo data.`, error);
       }
