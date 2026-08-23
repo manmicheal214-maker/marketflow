@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { fetchMyWorkspaces, getCurrentWorkspaceId, setCurrentWorkspaceId, type Workspace } from "@/lib/workspace";
+import { queryClient } from "@/lib/queryClient";
 
 type WorkspaceContextValue = { workspaces: Workspace[]; currentWorkspace: Workspace | null; loading: boolean; switchWorkspace: (id: string) => void; refetch: () => Promise<void> };
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -20,8 +21,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setWorkspaces(fetched);
       const persistedId = getCurrentWorkspaceId();
       const selected = fetched.find(w => w.id === persistedId) ?? fetched[0] ?? null;
+      const workspaceChanged = selected?.id !== persistedId;
       setCurrentWorkspace(selected);
       setCurrentWorkspaceId(selected?.id ?? null);
+      if (workspaceChanged) await queryClient.invalidateQueries();
     } catch (error) {
       console.warn("Failed to load workspaces.", error);
       setWorkspaces([]); setCurrentWorkspace(null); setCurrentWorkspaceId(null);
@@ -40,6 +43,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (!selected) return;
     setCurrentWorkspace(selected);
     setCurrentWorkspaceId(selected.id);
+    void queryClient.invalidateQueries();
   }, [workspaces]);
 
   const value = useMemo(() => ({ workspaces, currentWorkspace, loading, switchWorkspace, refetch: load }), [workspaces, currentWorkspace, loading, switchWorkspace, load]);
