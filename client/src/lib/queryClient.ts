@@ -35,7 +35,7 @@ function toSnakeCase(obj: Record<string, any>): Record<string, any> {
   return out;
 }
 
-function toCamelCase<T = any>(obj: Record<string, any>): T {
+export function toCamelCase<T = any>(obj: Record<string, any>): T {
   const out: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
     const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
@@ -199,6 +199,9 @@ export const getQueryFn: <T>(options: { on401: UnauthorizedBehavior }) => QueryF
         return (data ?? []).map((row) => toCamelCase(row)) as T;
       } catch (error) {
         console.warn(`Supabase query failed for ${qk}; falling back to demo data.`, error);
+        // A configured live table must not silently substitute tenant data from demo-data.json.
+        // Return an empty live result instead; non-live endpoints retain their demo fallback below.
+        return [] as T;
       }
     }
 
