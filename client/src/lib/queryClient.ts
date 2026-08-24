@@ -24,6 +24,9 @@ const SUPABASE_TABLE_MAP: Record<string, string> = {
   "/api/campaigns": "campaigns",
   "/api/automations": "automations",
   "/api/email-events": "email_events",
+  "/api/segments": "segments",
+  "/api/templates": "templates",
+  "/api/ab-tests": "ab_tests",
 };
 
 function toSnakeCase(obj: Record<string, any>): Record<string, any> {
@@ -116,6 +119,25 @@ export async function apiRequest(method: string, url: string, data?: unknown | u
     const payload = toSnakeCase(rawPayload);
     delete payload.workspace_id;
 
+    if (live.table === "segments" && method === "POST") {
+      const { data: newId, error } = await supabase.rpc("create_segment", {
+        p_workspace_id: workspaceId,
+        p_name: rawPayload.name,
+        p_description: rawPayload.description,
+        p_rules: rawPayload.rules,
+        p_combinator: rawPayload.combinator,
+      });
+      if (error) throw error;
+      const { data: created, error: fetchErr } = await supabase
+        .from("segments")
+        .select("*")
+        .eq("id", newId)
+        .eq("workspace_id", workspaceId)
+        .single();
+      if (fetchErr) throw fetchErr;
+      return responseFromJson(toCamelCase(created));
+    }
+
     if (method === "POST") {
       const { data: inserted, error } = await supabase
         .from(live.table)
@@ -199,9 +221,29 @@ export const getQueryFn: <T>(options: { on401: UnauthorizedBehavior }) => QueryF
         return (data ?? []).map((row) => toCamelCase(row)) as T;
       } catch (error) {
         console.warn(`Supabase query failed for ${qk}; falling back to demo data.`, error);
-        // A configured live table must not silently substitute tenant data from demo-data.json.
-        // Return an empty live result instead; non-live endpoints retain their demo fallback below.
         return [] as T;
+      }
+    }
+
+    if (isSupabaseConfigured && qk === "/api/analytics") {
+      const workspaceId = getCurrentWorkspaceId();
+      if (!workspaceId) return null;
+      const { data, error } = await supabase.rpc("get_workspace_analytics", { p_workspace_id: workspaceId });
+      if (error) {
+        console.warn("Supabase analytics RPC failed; falling back to demo data.", error);
+      } else {
+        return toCamelCase(data as Record<string, any>) as T;
+      }
+    }
+
+    if (isSupabaseConfigured && qk === "/api/lead-scoring/distribution") {
+      const workspaceId = getCurrentWorkspaceId();
+      if (!workspaceId) return null;
+      const { data, error } = await supabase.rpc("get_lead_score_distribution", { p_workspace_id: workspaceId });
+      if (error) {
+        console.warn("Supabase lead score distribution RPC failed; falling back to demo data.", error);
+      } else {
+        return data as T;
       }
     }
 
