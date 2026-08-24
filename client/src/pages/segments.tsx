@@ -134,9 +134,9 @@ export default function Segments() {
 
 function SegmentForm({ onSubmit, loading }: { onSubmit: (data: any) => void; loading: boolean }) {
   const [name, setName] = useState("");
+  const [selectedTemplate, setSelectedTemplate] = useState("");
   const [description, setDescription] = useState("");
 
-  // Pre-built rule templates for the demo
   const ruleTemplates: Record<string, any[]> = {
     "Highly Engaged": [
       { field: "engagementScore", operator: ">=", value: 26 },
@@ -153,7 +153,7 @@ function SegmentForm({ onSubmit, loading }: { onSubmit: (data: any) => void; loa
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const rules = ruleTemplates[name] || [{ field: "engagementScore", operator: ">=", value: 0 }];
+    const rules = ruleTemplates[selectedTemplate] || [{ field: "engagementScore", operator: ">=", value: 0 }];
     onSubmit({
       name,
       description: description || `Segment: ${name}`,
@@ -178,7 +178,13 @@ function SegmentForm({ onSubmit, loading }: { onSubmit: (data: any) => void; loa
         </div>
         <div className="space-y-2">
           <Label>Rule Template</Label>
-          <Select value={name} onValueChange={setName}>
+          <Select
+            value={selectedTemplate}
+            onValueChange={(value) => {
+              setSelectedTemplate(value);
+              if (!name.trim()) setName(value);
+            }}
+          >
             <SelectTrigger><SelectValue placeholder="Choose a template..." /></SelectTrigger>
             <SelectContent>
               {Object.keys(ruleTemplates).map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
