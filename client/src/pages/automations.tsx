@@ -8,7 +8,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -22,7 +21,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { LoadingState, EmptyState } from "@/components/shared";
-import { formatDate, parseJSON } from "@/lib/format";
+import { parseJSON } from "@/lib/format";
 
 const stepIcons: Record<string, any> = {
   send_email: Mail,
@@ -41,10 +40,17 @@ const triggerLabels: Record<string, string> = {
   campaign_opened: "Campaign Opened",
 };
 
+const mutationError = (toast: ReturnType<typeof useToast>["toast"]) => (error: any) =>
+  toast({
+    title: "Something went wrong",
+    description: error?.message || "Please try again.",
+    variant: "destructive",
+  });
+
 export default function Automations() {
   const { toast } = useToast();
   const [addOpen, setAddOpen] = useState(false);
-  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const { data: automations, isLoading } = useQuery<any>({ queryKey: ["/api/automations"] });
 
@@ -58,20 +64,22 @@ export default function Automations() {
       toast({ title: "Automation created" });
       setAddOpen(false);
     },
+    onError: mutationError(toast),
   });
 
   const toggleMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: number; status: string }) => {
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
       const res = await apiRequest("PUT", `/api/automations/${id}`, { status });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/automations"] });
     },
+    onError: mutationError(toast),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async (id: string) => {
       await apiRequest("DELETE", `/api/automations/${id}`);
     },
     onSuccess: () => {
@@ -79,6 +87,7 @@ export default function Automations() {
       toast({ title: "Automation deleted" });
       setDeleteId(null);
     },
+    onError: mutationError(toast),
   });
 
   if (isLoading) return <LoadingState label="Loading automations..." />;
@@ -125,25 +134,26 @@ export default function Automations() {
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="text-right mr-2">
-                        <div className="text-lg font-bold">{automation.enrolledCount}</div>
+                        <div className="text-lg font-bold">{automation.enrolledCount ?? 0}</div>
                         <div className="text-xs text-muted-foreground">enrolled</div>
                       </div>
                       <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => toggleMutation.mutate({ id: automation.id, status: automation.status === "active" ? "paused" : "active" })}>
                         {automation.status === "active" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => setDeleteId(automation.id)}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => setDeleteId(String(automation.id))}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
 
-                  {/* Workflow visualization */}
                   <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                    {steps.map((step: any, i: number) => {
+                    {steps.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">No workflow steps configured yet.</span>
+                    ) : steps.map((step: any, i: number) => {
                       const Icon = stepIcons[step.type] || Mail;
                       const isCondition = step.type === "condition";
                       return (
-                        <div key={step.id} className="flex items-center gap-2 shrink-0">
+                        <div key={step.id ?? i} className="flex items-center gap-2 shrink-0">
                           <div className={`flex flex-col items-center gap-1 rounded-lg border px-3 py-2 min-w-[120px] ${isCondition ? "border-amber-300 bg-amber-50 dark:bg-amber-950/30" : "border-border bg-muted/30"}`}>
                             <Icon className={`h-4 w-4 ${isCondition ? "text-amber-500" : "text-muted-foreground"}`} />
                             <span className="text-xs font-medium text-center">{step.label}</span>
@@ -180,42 +190,16 @@ function AutomationForm({ onSubmit, loading }: { onSubmit: (data: any) => void; 
   const [name, setName] = useState("");
   const [triggerType, setTriggerType] = useState("contact_added");
 
-  // Pre-built workflow templates
-  const workflows: Record<string, any> = {
-    "Welcome Series": {
-      triggerType: "contact_added",
-      steps: [
-        { id: 1, type: "send_email", label: "Send Welcome Email", config: { templateId: 1 } },
-        { id: 2, type: "wait", label: "Wait 2 Days", config: { days: 2 } },
-        { id: 3, type: "condition", label: "Did contact open email?", config: {} },
-        { id: 4, type: "send_email", label: "Send Product Email", config: { templateId: 4 } },
-      ],
-    },
-    "Re-engagement": {
-      triggerType: "enters_segment",
-      steps: [
-        { id: 1, type: "send_email", label: "Send Re-engagement Email", config: {} },
-        { id: 2, type: "wait", label: "Wait 3 Days", config: { days: 3 } },
-        { id: 3, type: "send_email", label: "Send Final Reminder", config: {} },
-      ],
-    },
-    "Tag-based Follow-up": {
-      triggerType: "tag_added",
-      steps: [
-        { id: 1, type: "send_email", label: "Send Tagged Email", config: {} },
-        { id: 2, type: "add_tag", label: "Add Follow-up Tag", config: {} },
-      ],
-    },
-  };
-
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const wf = workflows[name] || workflows["Welcome Series"];
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+
     onSubmit({
-      name,
-      triggerType: wf.triggerType,
+      name: trimmedName,
+      triggerType,
       triggerConfig: JSON.stringify({}),
-      steps: JSON.stringify(wf.steps),
+      steps: JSON.stringify([]),
       status: "active",
       enrolledCount: 0,
     });
@@ -232,17 +216,17 @@ function AutomationForm({ onSubmit, loading }: { onSubmit: (data: any) => void; 
           <Input id="a-name" value={name} onChange={(e) => setName(e.target.value)} required data-testid="input-automation-name" />
         </div>
         <div className="space-y-2">
-          <Label>Workflow Template</Label>
-          <Select value={name} onValueChange={setName}>
-            <SelectTrigger><SelectValue placeholder="Choose a workflow..." /></SelectTrigger>
+          <Label>Trigger</Label>
+          <Select value={triggerType} onValueChange={setTriggerType}>
+            <SelectTrigger><SelectValue placeholder="Choose a trigger..." /></SelectTrigger>
             <SelectContent>
-              {Object.keys(workflows).map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
+              {Object.entries(triggerLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">Select a pre-built workflow template. Custom step builder available in the full version.</p>
+          <p className="text-xs text-muted-foreground">Choose when this automation should start. Add workflow steps from the workflow builder when available.</p>
         </div>
         <DialogFooter>
-          <Button type="submit" disabled={loading} data-testid="button-save-automation">
+          <Button type="submit" disabled={loading || !name.trim()} data-testid="button-save-automation">
             {loading ? "Creating..." : "Create Automation"}
           </Button>
         </DialogFooter>
