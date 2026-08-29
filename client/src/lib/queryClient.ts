@@ -22,11 +22,15 @@ const keyMap: Record<string, string> = {
 const SUPABASE_TABLE_MAP: Record<string, string> = {
   "/api/contacts": "contacts",
   "/api/campaigns": "campaigns",
-  "/api/automations": "automations",
   "/api/email-events": "email_events",
   "/api/segments": "segments",
   "/api/templates": "templates",
   "/api/ab-tests": "ab_tests",
+};
+
+const SUPABASE_MUTATION_TABLE_MAP: Record<string, string> = {
+  ...SUPABASE_TABLE_MAP,
+  "/api/automations": "automations",
 };
 
 function toSnakeCase(obj: Record<string, any>): Record<string, any> {
@@ -88,12 +92,17 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-function liveTableForUrl(url: string): { table: string; id?: string } | null {
-  const exact = SUPABASE_TABLE_MAP[url];
+function liveTableForUrl(url: string, mutation = false): { table: string; id?: string } | null {
+  const map = mutation ? SUPABASE_MUTATION_TABLE_MAP : SUPABASE_TABLE_MAP;
+  const exact = map[url];
   if (exact) return { table: exact };
   if (url.startsWith("/api/contacts/")) {
     const id = url.slice("/api/contacts/".length).split("/")[0];
     if (id) return { table: "contacts", id };
+  }
+  if (mutation && url.startsWith("/api/automations/")) {
+    const id = url.slice("/api/automations/".length).split("/")[0];
+    if (id) return { table: "automations", id };
   }
   return null;
 }
@@ -106,7 +115,7 @@ function responseFromJson(value: unknown, status = 200): Response {
 }
 
 export async function apiRequest(method: string, url: string, data?: unknown | undefined): Promise<Response> {
-  const live = isSupabaseConfigured ? liveTableForUrl(url) : null;
+  const live = isSupabaseConfigured ? liveTableForUrl(url, method !== "GET") : null;
 
   if (live) {
     const workspaceId = getCurrentWorkspaceId();
@@ -136,6 +145,23 @@ export async function apiRequest(method: string, url: string, data?: unknown | u
         .single();
       if (fetchErr) throw fetchErr;
       return responseFromJson(toCamelCase(created));
+    }
+
+    if (live.table === "automations" && method === "POST") {
+      const { data: newId, error } = await supabase.rpc("create_automation", {
+        p_workspace_id: workspaceId,
+        p_name: rawPayload.name,
+        p_trigger_type: rawPayload.triggerType,
+      });
+      if (error) throw error;
+
+      const { data: all, error: fetchErr } = await supabase.rpc("get_workspace_automations", {
+        p_workspace_id: workspaceId,
+      });
+      if (fetchErr) throw fetchErr;
+      const created = (Array.isArray(all) ? all : []).find((automation: any) => String(automation.id) === String(newId));
+      if (!created) throw new Error("Automation was created but could not be loaded.");
+      return responseFromJson(created);
     }
 
     if (method === "POST") {
@@ -192,6 +218,20 @@ export const getQueryFn: <T>(options: { on401: UnauthorizedBehavior }) => QueryF
   async ({ queryKey }) => {
     const qk = queryKey.join("/");
     const live = isSupabaseConfigured ? liveTableForUrl(qk) : null;
+
+    if (isSupabaseConfigured && qk === "/api/automations") {
+      const workspaceId = getCurrentWorkspaceId();
+      if (!workspaceId) return null;
+      try {
+        const { data, error } = await supabase.rpc("get_workspace_automations", {
+          p_workspace_id: workspaceId,
+        });
+        if (error) throw error;
+        return (Array.isArray(data) ? data : []) as T;
+      } catch (error) {
+        console.warn("Supabase automations RPC failed; falling back to demo data.", error);
+      }
+    }
 
     if (live) {
       const workspaceId = getCurrentWorkspaceId();
