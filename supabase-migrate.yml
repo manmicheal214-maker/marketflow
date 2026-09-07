@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  migrate:
+  migrate-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +30,34 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
-      - name: Deploy edge functions
+      # ── Edge functions ──
+      # Each function's --no-verify-jwt flag matches its actual live setting.
+      # notify-automation-event is intentionally NOT deployed here — it's
+      # dead code since handle_new_contact() stopped calling it. Left in the
+      # repo for reference only; don't add it back to this list without
+      # removing that comment in the function's own file first.
+
+      - name: Deploy send-campaign (verify_jwt: true)
+        run: supabase functions deploy send-campaign
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy resend-webhook (verify_jwt: false)
+        run: supabase functions deploy resend-webhook --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy run-automations (verify_jwt: false)
+        run: supabase functions deploy run-automations --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy unsubscribe (verify_jwt: false)
+        run: supabase functions deploy unsubscribe --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy ai-marketing-assistant (verify_jwt: true)
         run: supabase functions deploy ai-marketing-assistant
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
